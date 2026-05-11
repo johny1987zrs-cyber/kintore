@@ -177,7 +177,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Hiragino Sans',sans-serif;bac
 <div id="s-t" class="screen">
   <div class="hdr">
     <button class="back" onclick="nav('h')">‹</button>
-    <h1 id="t-date"></h1>
+    <div style="display:flex;align-items:center;gap:6px">
+      <h1 id="t-date"></h1>
+      <button onclick="showDatePicker()" style="background:rgba(255,255,255,.2);border:none;color:#fff;border-radius:8px;padding:3px 8px;font-size:11px;font-weight:600;cursor:pointer">変更</button>
+      <input type="date" id="t-date-input" style="display:none;position:absolute;opacity:0;pointer-events:none" onchange="changeDate(this.value)">
+    </div>
     <span id="editing-badge" class="editing-badge" style="position:absolute;right:12px;display:none">編集中</span>
   </div>
   <div class="row-line">
@@ -238,7 +242,7 @@ const EX={
   "インクラインベンチプレス":  {type:'str',rm:true, ipf:false, hasGrip:false},
   "アームカール（ベンチ）":   {type:'str',rm:true, ipf:false, hasGrip:true},
   "縄プレスダウン":            {type:'str',rm:true, ipf:false, hasGrip:false},
-  "ディップス":                {type:'str',rm:false,ipf:false, hasGrip:false},
+  "ディップス":                {type:'dip',rm:false,ipf:false, hasGrip:false},
   "ショルダープレス":          {type:'str',rm:false,ipf:false, hasGrip:false},
   "プーリー":                  {type:'str',rm:false,ipf:false, hasGrip:false},
   "ハイロー":                  {type:'str',rm:false,ipf:false, hasGrip:false},
@@ -261,7 +265,17 @@ const GROUPS=[
 ];
 const IPF=[320.98607521,281.4080528,0.01008576];
 const WC=[59,66,74,83,93,105,120,"120+"];
-const COMP={59:[87.5,82.5,80,77.5,75,72.5,70,67.5,65,62.5],66:[102.5,97.5,95,90,87.5,85,82.5,80,77.5,75],74:[120,115,110,107.5,105,102.5,100,97.5,95,92.5],83:[137.5,132.5,130,125,122.5,120,117.5,115,112.5,110],93:[155,150,145,142.5,140,137.5,135,132.5,130,127.5],105:[172.5,167.5,162.5,160,157.5,155,150,147.5,145,142.5],120:[190,185,180,177.5,175,172.5,170,167.5,165,162.5],"120+":[207.5,202.5,197.5,195,192.5,190,187.5,185,182.5,180]};
+const COMP={
+  // 第5回新人限定TOKYOベンチプレス選手権（2026/05/03）実績データ
+  59:[],
+  66:[145.0,132.5,105.0,45.0],
+  74:[145.0,135.0,132.5,125.0,120.0,120.0,120.0,110.0,100.0,100.0,90.0],
+  83:[155.0,145.0,130.0,120.0],
+  93:[132.5,130.0,110.0],
+  105:[175.0,120.0],
+  120:[160.0,130.0],
+  "120+":[]
+};
 
 let sessions=[], cur=null, sid=Date.now(), prFired=new Set();
 let editingDate=null; // 編集中の日付
@@ -349,6 +363,28 @@ async function load(){
   }
 }
 
+function showDatePicker(){
+  const inp=document.getElementById('t-date-input');
+  inp.value=editingDate;
+  inp.style.display='block';
+  inp.style.opacity='0';
+  inp.style.pointerEvents='auto';
+  inp.focus();
+  inp.click();
+  setTimeout(()=>{inp.style.display='none';inp.style.pointerEvents='none';},500);
+}
+function changeDate(newDate){
+  if(!newDate||newDate===editingDate)return;
+  // 古い日付のセッションを削除
+  sessions=sessions.filter(s=>s.date!==editingDate);
+  editingDate=newDate;
+  cur.date=newDate;
+  document.getElementById('t-date').textContent=fmtDate(newDate);
+  const badge=document.getElementById('editing-badge');
+  badge.style.display=newDate!==TODAY?'inline-block':'none';
+  syncSession();
+  renderPrevCard(newDate);
+}
 function nav(id){
   ['h','t','l'].forEach(s=>{
     document.getElementById('s-'+s).classList.toggle('on',s===id);
@@ -437,8 +473,16 @@ function onBW(){
   const v=document.getElementById('bw').value;
   if(cur)cur.bw=parseFloat(v)||null;
   try{if(v)localStorage.setItem('km4_bw',v);}catch(e){}
-  if(cur)cur.exercises.forEach((ex)=>{
+  if(cur)cur.exercises.forEach((ex,ei)=>{
     if(EX[ex.name]?.type==='crd')ex.sets.forEach(st=>refreshKcal(st.id,ex.name));
+    if(EX[ex.name]?.type==='dip'){
+      const bw2=parseFloat(document.getElementById('bw').value)||0;
+      ex.sets.forEach(st=>{
+        st.w=bw2?String(bw2):'';
+        const inp=document.getElementById('dw-'+st.id);
+        if(inp)inp.value=bw2||'';
+      });
+    }
   });
   calcStats();renderBench();
 }
@@ -458,16 +502,20 @@ function addEx(name){
   closeModal();
   const last=getLastSession(editingDate);
   const lEx=last?.exercises?.find(e=>e.name===name);
+  const bw2now=parseFloat(document.getElementById('bw').value)||0;
+  const isAutoBW=EX[name]?.type==='dip';
   const sets=lEx
-    ?lEx.sets.map(st=>({id:++sid,w:'',r:'',duration:'',grip:st.grip||'',_prev:st.w||'',_prevr:st.r||''}))
-    :[{id:++sid,w:'',r:'',duration:'',grip:'',_prev:'',_prevr:''}];
+    ?lEx.sets.map(st=>({id:++sid,w:isAutoBW?(bw2now?String(bw2now):''):st.w||'',r:'',duration:'',grip:st.grip||'',_prev:st.w||'',_prevr:st.r||''}))
+    :[{id:++sid,w:isAutoBW?(bw2now?String(bw2now):''):'',r:'',duration:'',grip:'',_prev:'',_prevr:''}];
   cur.exercises.push({name,sets});
   renderEx();calcStats();
 }
 function delEx(ei){cur.exercises.splice(ei,1);renderEx();calcStats();renderBench();}
 function addSet(ei){
   const ex=cur.exercises[ei];const last=ex.sets[ex.sets.length-1];
-  ex.sets.push({id:++sid,w:'',r:'',duration:'',grip:last?.grip||'',_prev:'',_prevr:''});
+  const isAutoBW=EX[ex.name]?.type==='dip';
+  const bw2now=parseFloat(document.getElementById('bw').value)||0;
+  ex.sets.push({id:++sid,w:isAutoBW?(bw2now?String(bw2now):''):last?.w||'',r:'',duration:'',grip:last?.grip||'',_prev:'',_prevr:''});
   renderEx();
 }
 function delSet(ei,sid2){
@@ -488,7 +536,7 @@ function onInput(ei,setId,field,val){
   if(!st)return;
   st[field]=val;
   const d=EX[ex.name]||{type:'str'};
-  if(d.type==='str'&&(field==='w'||field==='r')){
+  if((d.type==='str'||d.type==='dip')&&(field==='w'||field==='r')){
     const o=orm(+st.w,+st.r);
     const bORM2=d.rm?bORM(ex.name,editingDate):0;
     const bW2=!d.rm?bW(ex.name,editingDate):0;
@@ -571,6 +619,22 @@ function renderEx(){
           <button class="sdel" onclick="delSet(${ei},${st.id})">×</button>
         </div>`;
       }).join('');
+    } else if(d.type==='dip'){
+      const bw2=parseFloat(document.getElementById('bw').value)||0;
+      colHd=`<div class="col-hd str"><span></span><span style="text-align:center">体重 (自動)</span><span style="text-align:center">回数</span><span style="text-align:right"></span><span></span></div>`;
+      const bRepD=bRep(ex.name,editingDate);
+      rows=ex.sets.map((st,i)=>{
+        const wVal=bw2||st.w||0;
+        const isPR=st.r&&bRepD&&+st.r>bRepD;
+        const phR=st._prevr?`前回:${st._prevr}`:'回数';
+        return`<div class="srow str">
+          <span class="sn">${i+1}</span>
+          <input type="number" class="si" id="dw-${st.id}" value="${wVal}" placeholder="体重" step="0.1" style="background:#f8f8f8;color:#aaa" readonly>
+          <input type="number" class="si" value="${st.r}" placeholder="${phR}" min="1" max="30" oninput="onInput(${ei},${st.id},'r',this.value)">
+          <div class="rm-cell">${isPR?'<span class="pr">PR!</span>':''}</div>
+          <button class="sdel" onclick="delSet(${ei},${st.id})">×</button>
+        </div>`;
+      }).join('');
     } else {
       colHd=`<div class="col-hd str"><span></span><span style="text-align:center">重量 Kg</span><span style="text-align:center">回数</span><span style="text-align:right">${d.rm?'RM':''}</span><span></span></div>`;
       const bORM2=d.rm?bORM(ex.name,editingDate):0;const bW2=!d.rm?bW(ex.name,editingDate):0;
@@ -607,6 +671,10 @@ function calcStats(){
     ex.sets.forEach(st=>{
       if(d.type==='crd'){if(+st.duration)ts++;}
       else if(d.type==='bwt'){if(+st.r){ts++;tr+=+st.r;}}
+      else if(d.type==='dip'){
+        const bw2=parseFloat(document.getElementById('bw').value)||+st.w||0;
+        if(+st.r){ts++;tr+=+st.r;tl+=bw2*(+st.r);}
+      }
       else{if(+st.w&&+st.r){ts++;tr+=+st.r;tl+=+st.w*+st.r;}}
     });
   });
